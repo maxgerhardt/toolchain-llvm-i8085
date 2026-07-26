@@ -59,9 +59,15 @@ jobs:
 
       - name: Configure (Linux)
         if: matrix.os == 'ubuntu-latest'
+        # Optimize for size (-Os): a stripped -O3 clang is ~109MB, just over
+        # GitHub's 100MB per-file push limit. -Os drops it ~15-25% while keeping
+        # a single, fully static, standalone binary. This only affects how clang
+        # itself is compiled — the 8085 code it emits is unchanged.
         run: |
           cmake -G Ninja -S llvm-project/llvm -B build \
             -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_C_FLAGS_RELEASE=-Os -DNDEBUG" \
+            "-DCMAKE_CXX_FLAGS_RELEASE=-Os -DNDEBUG" \
             -DLLVM_ENABLE_PROJECTS="clang;lld" \
             -DLLVM_TARGETS_TO_BUILD=I8085 -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=I8085 \
             -DLLVM_ENABLE_ASSERTIONS=OFF -DLLVM_PARALLEL_LINK_JOBS=1 \
