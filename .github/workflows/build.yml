@@ -12,12 +12,12 @@ concurrency:
 env:
   LLVM_REPO: https://github.com/maxgerhardt/llvm-project-i8085.git
   LLVM_BRANCH: i8085-peephole-and-compare-fusion
-  # Exact tool targets to build (each is copied into the package below; the
-  # alias tools ld.lld / llvm-ranlib / llvm-readelf are their own symlink
-  # targets, so they must be named explicitly).
+  # Base tool targets that always exist (the alias tools ld.lld / llvm-ranlib /
+  # llvm-readelf are NOT build targets in a minimal config — they're created by
+  # copy-renaming below, since lld/llvm-ar/llvm-readobj dispatch on argv[0]).
   TOOL_TARGETS: >-
-    clang ld.lld llvm-objcopy llvm-objdump llvm-ar llvm-ranlib
-    llvm-size llvm-mc llvm-nm llvm-readelf
+    clang lld llvm-objcopy llvm-objdump llvm-ar
+    llvm-size llvm-mc llvm-nm llvm-readobj
 
 jobs:
   build:
@@ -100,9 +100,14 @@ jobs:
           set -e
           rm -rf pkg && mkdir -p pkg/bin
           EXE=""; [ "${{ runner.os }}" = "Windows" ] && EXE=".exe"
-          for t in clang ld.lld llvm-objcopy llvm-objdump llvm-ar llvm-ranlib llvm-size llvm-mc llvm-nm llvm-readelf; do
-            cp "build/bin/$t$EXE" "pkg/bin/" 2>/dev/null || echo "warn: $t missing"
+          # base tools copied 1:1
+          for t in clang llvm-objcopy llvm-objdump llvm-ar llvm-size llvm-mc llvm-nm; do
+            cp "build/bin/$t$EXE" "pkg/bin/$t$EXE"
           done
+          # alias tools: copy-rename a multi-call binary (it dispatches on its own name)
+          cp "build/bin/lld$EXE"        "pkg/bin/ld.lld$EXE"
+          cp "build/bin/llvm-ar$EXE"    "pkg/bin/llvm-ranlib$EXE"
+          cp "build/bin/llvm-readobj$EXE" "pkg/bin/llvm-readelf$EXE"
           # host-independent parts shipped on main:
           cp -r lib pkg/lib
           cp -r sysroot pkg/sysroot
