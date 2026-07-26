@@ -1,0 +1,26 @@
+{
+  "name": "toolchain-llvm-i8085",
+  "version": "1.0.0",
+  "description": "LLVM/Clang toolchain for the Intel 8085 (MCS-85). Targets i8085-unknown-elf and ships a bundled picolibc-based sysroot (headers + libc/libgcc) plus ld.lld and the llvm-* binary utilities.",
+  "keywords": [
+    "toolchain",
+    "build tools",
+    "compiler",
+    "assembler",
+    "linker",
+    "i8085",
+    "8085",
+    "mcs-85",
+    "intel",
+    "clang",
+    "llvm"
+  ],
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/maxgerhardt/toolchain-llvm-i8085"
+  },
+  "system": [
+    "linux_x86_64"
+  ]
+}
