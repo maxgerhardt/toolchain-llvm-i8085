@@ -1,0 +1,132 @@
+name: Build packages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LLVM_REPO: https://github.com/maxgerhardt/llvm-project-i8085.git
+  LLVM_BRANCH: i8085-peephole-and-compare-fusion
+  # Tools that make up the packaged toolchain.
+  TOOL_TARGETS: >-
+    clang lld llvm-objcopy llvm-objdump llvm-ar llvm-size llvm-mc llvm-nm llvm-readobj
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            branch: linux_x64
+            system: linux_x86_64
+          - os: macos-14
+            branch: darwin_arm64
+            system: darwin_arm64
+          - os: windows-latest
+            branch: windows_x64
+            system: windows_amd64
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4  # main: sysroot/, lib/, CI, package.json
+
+      - name: Free disk space (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
+
+      - name: Install Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v5
+      - name: MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Clone LLVM (i8085)
+        shell: bash
+        run: git clone --depth 1 --branch "$LLVM_BRANCH" "$LLVM_REPO" llvm-project
+
+      - name: Configure (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cmake -G Ninja -S llvm-project/llvm -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_PROJECTS="clang;lld" \
+            -DLLVM_TARGETS_TO_BUILD=I8085 -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=I8085 \
+            -DLLVM_ENABLE_ASSERTIONS=OFF -DLLVM_PARALLEL_LINK_JOBS=1 \
+            -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF \
+            "-DCMAKE_EXE_LINKER_FLAGS=-static-libgcc -static-libstdc++"
+
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cmake -G Ninja -S llvm-project/llvm -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_ENABLE_PROJECTS="clang;lld" \
+            -DLLVM_TARGETS_TO_BUILD=I8085 -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=I8085 \
+            -DLLVM_ENABLE_ASSERTIONS=OFF -DLLVM_PARALLEL_LINK_JOBS=1 \
+            -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake -G Ninja -S llvm-project/llvm -B build ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DLLVM_ENABLE_PROJECTS="clang;lld" ^
+            -DLLVM_TARGETS_TO_BUILD=I8085 -DLLVM_EXPERIMENTAL_TARGETS_TO_BUILD=I8085 ^
+            -DLLVM_ENABLE_ASSERTIONS=OFF -DLLVM_PARALLEL_LINK_JOBS=1 ^
+            -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF ^
+            -DLLVM_USE_CRT_RELEASE=MT
+        shell: cmd
+
+      - name: Build tools
+        shell: bash
+        run: cmake --build build --target $TOOL_TARGETS
+
+      - name: Assemble package
+        shell: bash
+        run: |
+          set -e
+          rm -rf pkg && mkdir -p pkg/bin
+          EXE=""; [ "${{ runner.os }}" = "Windows" ] && EXE=".exe"
+          for t in clang ld.lld llvm-objcopy llvm-objdump llvm-ar llvm-ranlib llvm-size llvm-mc llvm-nm llvm-readelf; do
+            cp "build/bin/$t$EXE" "pkg/bin/" 2>/dev/null || echo "warn: $t missing"
+          done
+          # host-independent parts shipped on main:
+          cp -r lib pkg/lib
+          cp -r sysroot pkg/sysroot
+          python3 - <<'PY'
+          import json
+          m = json.load(open("package.json")); m["system"] = ["${{ matrix.system }}"]
+          json.dump(m, open("pkg/package.json","w"), indent=2)
+          PY
+
+      - name: Smoke test
+        shell: bash
+        run: |
+          EXE=""; [ "${{ runner.os }}" = "Windows" ] && EXE=".exe"
+          echo 'int main(void){return 0;}' > t.c
+          pkg/bin/clang$EXE --target=i8085-unknown-elf -std=c23 -O2 -ffreestanding -fno-builtin \
+            -isystem pkg/sysroot/include -c t.c -o t.o
+          pkg/bin/llvm-readelf$EXE -h t.o | grep -i machine
+          echo "clang i8085 OK"
+
+      - name: Publish ${{ matrix.branch }}
+        shell: bash
+        run: |
+          cd pkg
+          git init -q
+          git checkout -b "${{ matrix.branch }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Build ${{ matrix.branch }} from ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "${{ matrix.branch }}"
