@@ -108,6 +108,14 @@ jobs:
           cp "build/bin/lld$EXE"        "pkg/bin/ld.lld$EXE"
           cp "build/bin/llvm-ar$EXE"    "pkg/bin/llvm-ranlib$EXE"
           cp "build/bin/llvm-readobj$EXE" "pkg/bin/llvm-readelf$EXE"
+          # Strip symbol tables. On Linux the ELF .symtab pushes clang past
+          # GitHub's 100MB per-file push limit; stripping keeps the binaries
+          # static+standalone but small. (Windows PE via MSVC has no strip and
+          # is already under the limit, so skip it there.)
+          if [ "${{ runner.os }}" != "Windows" ]; then
+            strip pkg/bin/* 2>/dev/null || true
+          fi
+          echo "=== stripped binary sizes ==="; ls -l pkg/bin
           # host-independent parts shipped on main:
           cp -r lib pkg/lib
           cp -r sysroot pkg/sysroot
@@ -129,7 +137,10 @@ jobs:
 
       - name: Publish ${{ matrix.branch }}
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e
           cd pkg
           git init -q
           git checkout -b "${{ matrix.branch }}"
@@ -137,4 +148,9 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -q -m "Build ${{ matrix.branch }} from ${GITHUB_SHA::7}"
-          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "${{ matrix.branch }}"
+          if ! git push -f "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" "${{ matrix.branch }}" 2>push.err; then
+            echo "::group::push stderr"; cat push.err; echo "::endgroup::"
+            while IFS= read -r line; do echo "::error::pushfail: $line"; done < push.err
+            exit 1
+          fi
+          echo "push OK"
