@@ -12,9 +12,12 @@ concurrency:
 env:
   LLVM_REPO: https://github.com/maxgerhardt/llvm-project-i8085.git
   LLVM_BRANCH: i8085-peephole-and-compare-fusion
-  # Tools that make up the packaged toolchain.
+  # Exact tool targets to build (each is copied into the package below; the
+  # alias tools ld.lld / llvm-ranlib / llvm-readelf are their own symlink
+  # targets, so they must be named explicitly).
   TOOL_TARGETS: >-
-    clang lld llvm-objcopy llvm-objdump llvm-ar llvm-size llvm-mc llvm-nm llvm-readobj
+    clang ld.lld llvm-objcopy llvm-objdump llvm-ar llvm-ranlib
+    llvm-size llvm-mc llvm-nm llvm-readelf
 
 jobs:
   build:
